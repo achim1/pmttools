@@ -2,10 +2,16 @@
 Some characteristica of the pmt charge response.
 
 """
-
+from pyevsel.fitting import calculate_chi_square, Model, gauss
 from scipy.constants import elementary_charge as ELEMENTARY_CHARGE
 
-def chi2_exponential_part(xs, data, pred, mu_ped, mu_ser):
+import numpy as np
+import pylab as p
+import seaborn.apionly as sb
+
+from functools import reduce
+
+def chi2_ndf_exponential_part(xs, data, pred, mu_ped, mu_ser):
     """
     The charge response spectrum typically has a fraction of events with 
     charges between 0 and 1 PE which are mostly best described by 
@@ -13,6 +19,8 @@ def chi2_exponential_part(xs, data, pred, mu_ped, mu_ser):
     This function calculates the chi2 for this part.
 
     """
+    # FIXME: ndf is wrong!!
+
     mask = np.logical_and(xs >= mu_ped, xs <= mu_ser)
     data = data[mask]
     pred = pred[mask]
@@ -49,8 +57,6 @@ def calculate_peak_to_valley_ratio(bestfitmodel, mu_ped, mu_spe, control_plot=Fa
         fig = p.figure()
         ax = fig.gca()
         ax.plot(bestfitmodel.xs,tmpdata)
-        print (valley)
-        print (valley_x)
 
         ax.scatter(valley_x,valley,marker="o")
         ax.scatter(peak_x, peak, marker="o")
@@ -63,7 +69,7 @@ def calculate_peak_to_valley_ratio(bestfitmodel, mu_ped, mu_spe, control_plot=Fa
 
 ################################################
 
-def get_n_hit(charges, nbins):
+def get_n_hit(charges, nbins=200):
     """
     Identify how many events are in the pedestal of a charge response 
     spectrum.
@@ -100,9 +106,23 @@ def calculate_gain(mu_ped, mu_spe, prefactor=1e-12):
     Returns:
         float
     """
-    charge = abs(mu_spe) - abs(mu_ped)
+    charge = abs(mu_spe - mu_ped)
     charge *= prefactor
     return charge/ELEMENTARY_CHARGE
+
+##############################################
+
+def calculate_mu(charges, nbins=200):
+    """
+    Calculate mu out of
+    P(hit) = (N_hit/N_all) = exp(QExCExLY)
+    where P is the probability for a hit, QE is quantum efficiency, CE is
+    """
+    n_hit, n_all = get_n_hit(charges, nbins)
+    n_pedestal = n_all - n_hit
+    #mu = -1 * np.log(n_pedestal / n_all)
+    mu = -1 * np.log(1 - (n_hit/n_all))
+    return mu
 
 
 

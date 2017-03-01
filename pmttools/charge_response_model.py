@@ -16,11 +16,16 @@ The model has 5 free parameters:
 
 import pyosci.tools as tools
 import pyosci.plotting as plt
-import pyosci.fit as fit
+
+from pyevsel import fitting as fit
+
 import numpy as np
 
 from scipy.special import erf
-from collections import namedtuple
+
+from functools import reduce
+
+from . import characteristics as c
 
 # The individual contributions to the model
 
@@ -125,7 +130,6 @@ def multi_PE_response(n):
         # no fit here
         mu_m = ((1 - p)*mu) + (p*A)
         sigma_m = ((1-p)*(sigma**2 + mu**2)) + (2*p*(A**2)) - (mu_m**2)
-        #response = fit.poisson(mpe.mu_exp, n)
         response = fit.gauss(x - mu_p, mu_m, sigma_m, n)
         return response
     return m_i
@@ -154,8 +158,8 @@ def construct_charge_response_model(charges,\
         nbins (int): Number of bins to use for the histogram
     """
         
-    n_hit, n_all = fit.get_n_hit(charges, nbins)
-    mu_exp = fit.calculate_mu(charges, nbins)
+    n_hit, n_all = c.get_n_hit(charges, nbins)
+    mu_exp = c.calculate_mu(charges, nbins)
 
     # the model needs to know about how likely
     # the individual occurences are
@@ -164,69 +168,28 @@ def construct_charge_response_model(charges,\
     p1 = np.exp(-mu_exp)*mu_exp
     p2 = fit.poisson(mu_exp, 2)
 
-    model = fit.Model(pedestal, norm=p0)
+    model = fit.Model(pedestal, func_norm=p0)
     if convolved_exponential:
         exponential_term = convolve_exponential_part(min(charges),max(charges))
     else:
         exponential_term = simple_exponential_response
-    model += fit.Model(exponential_term, norm=p1)
-    model += fit.Model(single_PE_response, norm=p1)
+    model += fit.Model(exponential_term, func_norm=p1)
+    model += fit.Model(single_PE_response, func_norm=p1)
 
     # treat the second (2PE) peak differently
     if model_2PE_response:
-        model += fit.Model(two_PE_response, norm=p2)
+        model += fit.Model(two_PE_response, func_norm=p2)
         if lowest_mpe_contrib == 2:
             lowest_mpe_contrib = 3
     # add a multi pe response
     for k, mpe_mod in enumerate([multi_PE_response(n) for n in range(lowest_mpe_contrib, highest_mpe_contrib)]):
         mpe_norm = fit.poisson(mu_exp,k+lowest_mpe_contrib)
-        model += fit.Model(mpe_mod, norm=mpe_norm)
+        model += fit.Model(mpe_mod, func_norm=mpe_norm)
 
     model.couple_all_models()
     print("Calculated mu of", mu_exp)
     print("Got n_hit ", n_hit, "n_nohit ",n_all - n_hit)
-
     return model
 
 
-def create_charge_response_from_file(name):
-    """
-    One shot function to create a default charge spectrum
-    from a file with waveform data
-
-    Args:
-        name (str): path to a file with numpy readable waveform data
-    """
-    
-
-    head, wf = tools.load_waveform(name)
-    plt.plot_waveform(head, tools.average_wf(wf))
-    all_charges = 1e12 * np.array([-1 * tools.integrate_wf(head, w) for w in wf])
-    #all_charges = all_charges[all_charges > -0.53]
-    mu = fit.calculate_mu(all_charges, 200)
-    nhit, nall = fit.get_n_hit(all_charges, 200)
-    charge_response_model = construct_charge_response_model(all_charges,\
-                                                model_2PE_response=True,\
-                                                convolved_exponential=True,\
-                                                lowest_mpe_contrib=2)
-    fitparams = namedtuple("fitparams",["N_i", "mu_p", "sigma_p", "p", "A", "mu", "sigma"])
-
-    startparams = fitparams(1,   -.2,    .1,     .8, .3, 3,   .2 )
-    bounds =              ((0,     -3,      0,     .0,  0,   0,   .05),
-                          (1,      0,     .5,      1,  100,   5,    5))
-
-    
-    model = fit.fit_model(all_charges, charge_response_model, startparams, rej_outliers=False,\
-                          bounds=bounds)
-    fig = model.plot_result(ymin=1e-4, xmax=5, xlabel=r"$Q$ [pC]",\
-                            model_alpha=.8,\
-                            add_parameter_text=((r"$\sigma_{{ped}}$& {:4.2e}\\",2),
-                                                (r"$\mu_{{SPE}}$& {:4.2e}\\",5),\
-                                                (r"$\sigma_{{SPE}}$& {:4.2e}\\",6),\
-                                                (r"$p_{{exp}}$& {:4.2e}\\",3)))
-
-    #ax = fig.gca()
-    #ax.grid(1)
-    #ax.set_xlim(xmax=15, xmin=-1)
-    return model, fig
 
